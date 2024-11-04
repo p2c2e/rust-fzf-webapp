@@ -171,9 +171,11 @@ async fn search(
         .spawn()
         .expect("Failed to spawn fzf");
 
-    // Use find to get the list of files and pipe to fzf
+    // Use find to get only regular files (not directories)
     let find_output = tokio::process::Command::new("find")
         .arg(".")
+        .arg("-type")
+        .arg("f")  // Only regular files
         .current_dir(root_path)
         .output()
         .await
@@ -189,13 +191,21 @@ async fn search(
     let output = child.wait_with_output().await.expect("Failed to get fzf output");
     let files: Vec<FileInfo> = String::from_utf8_lossy(&output.stdout)
         .lines()
-        .map(|s| FileInfo {
-            path: s.to_string(),
-            name: PathBuf::from(s)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(s)
-                .to_string(),
+        .filter_map(|s| {
+            let path = PathBuf::from(s);
+            // Additional check to ensure it's a file
+            if path.is_file() || !path.ends_with("/") {
+                Some(FileInfo {
+                    path: s.to_string(),
+                    name: path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(s)
+                        .to_string(),
+                })
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -207,6 +217,14 @@ async fn download_file(
     State(state): State<AppState>,
 ) -> Response {
     let full_path = PathBuf::from(state.root_path.as_str()).join(&file_path);
+    
+    // Additional check to ensure we're only serving files, not directories
+    if !full_path.is_file() {
+        return Response::builder()
+            .status(404)
+            .body(Body::from("Not a file or file not found"))
+            .unwrap();
+    }
     
     match tokio::fs::read(&full_path).await {
         Ok(contents) => {
