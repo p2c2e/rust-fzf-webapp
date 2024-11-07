@@ -596,15 +596,30 @@ async fn change_path(
     State(state): State<AppState>,
     Json(req): Json<ChangePathRequest>,
 ) -> Json<IndexStatus> {
+    println!("Changing path to: {}", req.path);
+    
     // Update the root path in the existing state
-    *Arc::make_mut(&mut Arc::clone(&state.root_path)) = PathBuf::from(&req.path);
+    let new_path = PathBuf::from(&req.path);
+    *Arc::make_mut(&mut Arc::clone(&state.root_path)) = new_path.clone();
+    println!("Updated root path to: {}", state.root_path.display());
+    
+    // Clear the existing index
+    {
+        let mut index = state.index.write().await;
+        index.clear();
+        println!("Cleared existing index");
+    }
+    
+    // Update config with new path
     {
         let mut config = state.config.write().await;
         config.add_path(req.path);
         let _ = config.save();
+        println!("Updated config with new path");
     }
     
     // Create new index
+    println!("Creating new index...");
     create_index(State(state.clone())).await
 }
 
