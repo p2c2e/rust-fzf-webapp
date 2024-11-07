@@ -147,6 +147,7 @@ async fn index() -> Html<&'static str> {
             <h1>Fuzzy File Search</h1>
             <div id="currentPath" style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px;">
                 Current Path: <span id="pathDisplay"></span>
+                <div id="indexStatus" style="font-size: 0.9em; color: #666;"></div>
             </div>
             <div class="controls">
                 <select id="pathSelect" onchange="changePath(this.value)">
@@ -418,7 +419,9 @@ async fn index() -> Html<&'static str> {
                     if (!path) return;
                     
                     const statusSpan = document.getElementById('indexStatus');
-                    statusSpan.textContent = 'Changed to: ' + path;
+                    if (statusSpan) {
+                        statusSpan.textContent = 'Changed to: ' + path;
+                    }
                     updatePathDisplay(path);
                     
                     try {
@@ -430,9 +433,14 @@ async fn index() -> Html<&'static str> {
                             body: JSON.stringify({ path }),
                         });
                         const result = await response.json();
-                        statusSpan.textContent = `Changed to ${path} (${result.total_files} files indexed)`;
+                        if (statusSpan) {
+                            statusSpan.textContent = `Changed to ${path} (${result.total_files} files indexed)`;
+                        }
                     } catch (err) {
-                        statusSpan.textContent = 'Error changing path: ' + err.message;
+                        if (statusSpan) {
+                            statusSpan.textContent = 'Error changing path: ' + err.message;
+                        }
+                        console.error('Error changing path:', err);
                     }
                 }
 
