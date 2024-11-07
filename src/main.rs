@@ -362,7 +362,6 @@ async fn download_file(
     }
 }
 
-#[tokio::main]
 #[derive(Deserialize)]
 struct ChangePathRequest {
     path: String,
@@ -391,7 +390,8 @@ async fn change_path(
     create_index(State(state.clone())).await
 }
 
-async fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let root_path = if args.len() > 1 {
         args[1].clone()
@@ -402,7 +402,7 @@ async fn main() {
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
     let state = AppState {
-        root_path: Arc::new(RwLock::new(PathBuf::from(root_path.clone()))),
+        root_path: Arc::new(PathBuf::from(root_path.clone())),
         index: Arc::new(RwLock::new(Vec::new())),
         config: Arc::new(RwLock::new(config)),
     };
@@ -427,11 +427,10 @@ async fn main() {
     println!("Server running on http://localhost:3000");
     
     axum::serve(
-        tokio::net::TcpListener::bind(&addr)
-            .await
-            .unwrap(),
+        tokio::net::TcpListener::bind(&addr).await?,
         app,
     )
-    .await
-    .unwrap();
+    .await?;
+
+    Ok(())
 }
