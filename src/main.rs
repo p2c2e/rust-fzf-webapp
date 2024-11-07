@@ -567,17 +567,17 @@ async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
     // Update the indices map with the new index
     {
         let mut indices = state.indices.write().await;
-        indices.insert(root_path.to_string_lossy().to_string(), new_index.clone());
+        indices.insert(user_selected_dir.to_string_lossy().to_string(), new_index.clone());
     }
 
     let status = IndexStatus {
         total_files: new_index.len(),
         last_updated: Utc::now(),
-        root_path: root_path.to_string_lossy().to_string(),
+        root_path: user_selected_dir.to_string_lossy().to_string(),
     };
 
     // Save the index to disk
-    if let Err(e) = IndexEntry::save_index(&new_index, &root_path) {
+    if let Err(e) = IndexEntry::save_index(&new_index, &user_selected_dir) {
         println!("Error saving index: {}", e);
     } else {
         println!("Index saved successfully");
@@ -594,7 +594,7 @@ async fn search(
     let indices = state.indices.read().await;
     
     // Get the current path's index
-    let current_path = user_selected_dir.to_string_lossy().to_string();
+    let current_path = state.user_selected_dir.read().await.to_string_lossy().to_string();
     let empty_vec = Vec::new();
     let index = indices.get(&current_path).unwrap_or(&empty_vec);
     
