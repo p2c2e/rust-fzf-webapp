@@ -105,21 +105,32 @@ async fn index() -> Html<&'static str> {
                     margin: 2rem auto;
                     padding: 0 1rem;
                 }
-                #results { 
-                    margin-top: 1rem; 
-                    white-space: pre-wrap;
+                .controls {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 0.5rem;
+                    margin-bottom: 1rem;
                 }
                 .search-container {
-                    display: flex;
-                    gap: 1rem;
+                    display: grid;
+                    grid-template-columns: 1fr auto;
+                    gap: 0.5rem;
                     margin-bottom: 1rem;
+                }
+                #results { 
+                    height: 400px;
+                    overflow-y: auto;
+                    border: 1px solid #ddd;
+                    padding: 0.5rem;
+                    margin-top: 0.5rem;
                 }
                 button {
                     padding: 0.5rem 1rem;
+                    width: 100%;
                 }
-                input {
-                    flex-grow: 1;
+                input, select {
                     padding: 0.5rem;
+                    width: 100%;
                 }
                 .file-link {
                     display: block;
@@ -138,19 +149,20 @@ async fn index() -> Html<&'static str> {
                 Current Path: <span id="pathDisplay"></span>
             </div>
             <div class="controls">
-                <button onclick="openDirectoryBrowser()">Browse Directories</button>
                 <select id="pathSelect" onchange="changePath(this.value)">
-                    <option value="">Select a recent path...</option>
+                    <option value="">Select recent path...</option>
                 </select>
                 <button onclick="createIndex()">Create/Update Index</button>
-                <span id="indexStatus"></span>
+                <button onclick="openDirectoryBrowser()">Browse Directories</button>
             </div>
             <div class="search-container">
-                <input type="text" id="search" placeholder="Enter search pattern...">
+                <input type="text" id="search" placeholder="Search query...">
                 <button onclick="search()">Search</button>
-                <button onclick="cancelSearch()" id="cancelBtn" style="display: none;">Cancel</button>
             </div>
-            <div id="results"></div>
+            <div id="results">
+                <div class="results-header">Search results: (only 25 rows visible)</div>
+            </div>
+            <button onclick="cancelSearch()" id="cancelBtn" style="display: none;">Cancel</button>
 
             <script>
                 let currentController = null;
@@ -228,7 +240,8 @@ async fn index() -> Html<&'static str> {
                         resultsDiv.innerHTML = '';
                         
                         // Create links for each file
-                        data.files.forEach(file => {
+                        // Only show first 25 results
+                        data.files.slice(0, 25).forEach(file => {
                             const link = document.createElement('a');
                             link.href = `/download/${encodeURIComponent(file.path)}`;
                             link.className = 'file-link';
