@@ -516,9 +516,13 @@ async fn download_file(
     Path(file_path): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
+    println!("Download request for file: {}", file_path);
+    println!("Root path is: {}", state.root_path.display());
+
     // Ensure the file_path doesn't contain parent directory traversal
     let file_path = PathBuf::from(file_path);
     if file_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        println!("Rejected due to parent directory traversal attempt");
         return Response::builder()
             .status(403)
             .body(Body::from("Invalid path"))
@@ -526,12 +530,22 @@ async fn download_file(
     }
 
     let full_path = state.root_path.join(&file_path);
+    println!("Full path constructed: {}", full_path.display());
     
     // Additional check to ensure we're only serving files within root_path
-    if !full_path.starts_with(&*state.root_path) || !full_path.is_file() {
+    if !full_path.starts_with(&*state.root_path) {
+        println!("Rejected: Path {} is outside root path {}", full_path.display(), state.root_path.display());
         return Response::builder()
             .status(404)
-            .body(Body::from("Not a file or file not found"))
+            .body(Body::from("File path outside root directory"))
+            .unwrap();
+    }
+
+    if !full_path.is_file() {
+        println!("Rejected: Path {} is not a file", full_path.display());
+        return Response::builder()
+            .status(404)
+            .body(Body::from("Not a file"))
             .unwrap();
     }
     
@@ -543,6 +557,8 @@ async fn download_file(
                 .unwrap_or("download")
                 .to_string();
             
+            println!("Successfully read file: {} ({} bytes)", filename, contents.len());
+            
             Response::builder()
                 .header(
                     header::CONTENT_DISPOSITION,
@@ -552,10 +568,13 @@ async fn download_file(
                 .body(Body::from(contents))
                 .unwrap()
         }
-        Err(_) => Response::builder()
-            .status(404)
-            .body(Body::from("File not found"))
-            .unwrap(),
+        Err(e) => {
+            println!("Error reading file {}: {}", full_path.display(), e);
+            Response::builder()
+                .status(404)
+                .body(Body::from(format!("Error reading file: {}", e)))
+                .unwrap()
+        }
     }
 }
 
