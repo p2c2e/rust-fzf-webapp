@@ -78,7 +78,8 @@ use std::collections::HashMap;
 
 #[derive(Clone)]
 struct AppState {
-    root_path: Arc<PathBuf>,
+    working_dir: Arc<PathBuf>,
+    user_selected_dir: Arc<RwLock<PathBuf>>,
     indices: Arc<RwLock<HashMap<String, Vec<IndexEntry>>>>,
     config: Arc<RwLock<Config>>,
 }
@@ -201,8 +202,8 @@ async fn index() -> Html<&'static str> {
         </head>
         <body>
             <h1>Fuzzy File Search</h1>
-            <div id="currentPath" style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px;">
-                Current Path: <span id="pathDisplay"></span>
+            <div id="selectedPath" style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px;">
+                Selected Directory: <span id="pathDisplay"></span>
                 <div id="indexStatus" style="font-size: 0.9em; color: #666;"></div>
             </div>
             <div class="controls">
@@ -534,11 +535,11 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
-    let root_path = state.root_path.clone();
+    let user_selected_dir = state.user_selected_dir.read().await.clone();
     println!("Creating index for root path: {}", root_path.display());
     
     let mut new_index = Vec::new();
-    for entry in WalkDir::new(root_path.as_ref())
+    for entry in WalkDir::new(&user_selected_dir)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
@@ -770,10 +771,8 @@ async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>>
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Runtime::new()?.block_on(async {
     // Start with current directory as default
-    let root_path = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .to_string_lossy()
-        .to_string();
+    let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let user_selected_dir = working_dir.clone();
 
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
@@ -787,7 +786,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     initial_indices.insert(root_path.clone(), initial_index.clone());
 
     let state = AppState {
-        root_path: Arc::new(PathBuf::from(&root_path)),
+        working_dir: Arc::new(working_dir.clone()),
+        user_selected_dir: Arc::new(RwLock::new(user_selected_dir.clone())),
         indices: Arc::new(RwLock::new(initial_indices)),
         config: Arc::new(RwLock::new(config)),
     };
