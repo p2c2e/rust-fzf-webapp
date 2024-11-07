@@ -16,6 +16,15 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::sync::RwLock;
 use walkdir::WalkDir;
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Starting directory path (defaults to current directory)
+    #[arg(short, long)]
+    path: Option<PathBuf>,
+}
 use std::fs;
 use std::io;
 
@@ -771,9 +780,12 @@ async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>>
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Runtime::new()?.block_on(async {
-    // Start with current directory as default
+    // Parse command line arguments
+    let args = Args::parse();
+    
+    // Use provided path or current directory as default
     let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let user_selected_dir = working_dir.clone();
+    let user_selected_dir = args.path.unwrap_or_else(|| working_dir.clone());
 
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
