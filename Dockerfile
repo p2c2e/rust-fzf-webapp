@@ -31,4 +31,4 @@ COPY --from=builder /usr/src/fuzzy-search/fuzzy-search-webapp/target/release/fuz
 EXPOSE 3000
 
 # Command to run the application
-CMD ["/usr/local/bin/fuzzy-search-webapp", "/data"]
+CMD ["/usr/local/bin/fuzzy-search-webapp", "-p", "/data"]
