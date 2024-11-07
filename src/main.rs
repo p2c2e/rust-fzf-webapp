@@ -248,7 +248,7 @@ async fn download_file(
     Path(file_path): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
-    let full_path = PathBuf::from(state.root_path.as_str()).join(&file_path);
+    let full_path = state.root_path.as_ref().join(&file_path);
     
     // Additional check to ensure we're only serving files, not directories
     if !full_path.is_file() {
