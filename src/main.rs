@@ -93,6 +93,10 @@ async fn index() -> Html<&'static str> {
         </head>
         <body>
             <h1>Fuzzy File Search</h1>
+            <div class="controls">
+                <button onclick="createIndex()">Create/Update Index</button>
+                <span id="indexStatus"></span>
+            </div>
             <div class="search-container">
                 <input type="text" id="search" placeholder="Enter search pattern...">
                 <button onclick="search()">Search</button>
@@ -102,6 +106,21 @@ async fn index() -> Html<&'static str> {
 
             <script>
                 let currentController = null;
+
+                async function createIndex() {
+                    const statusSpan = document.getElementById('indexStatus');
+                    statusSpan.textContent = 'Creating index...';
+                    
+                    try {
+                        const response = await fetch('/create-index', {
+                            method: 'POST'
+                        });
+                        const status = await response.json();
+                        statusSpan.textContent = `Indexed ${status.total_files} files`;
+                    } catch (err) {
+                        statusSpan.textContent = 'Error creating index: ' + err.message;
+                    }
+                }
 
                 async function search() {
                     const searchInput = document.getElementById('search');
@@ -168,62 +187,61 @@ async fn index() -> Html<&'static str> {
     "#)
 }
 
+async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
+    let mut index = state.index.write().await;
+    index.clear();
+
+    for entry in WalkDir::new(state.root_path.as_ref())
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        if let Ok(metadata) = entry.metadata() {
+            let path = entry.path().strip_prefix(state.root_path.as_ref())
+                .unwrap_or(entry.path())
+                .to_string_lossy()
+                .to_string();
+            
+            index.push(IndexEntry {
+                path: path.clone(),
+                name: entry.file_name().to_string_lossy().to_string(),
+                last_modified: metadata.modified()
+                    .unwrap_or_else(|_| std::time::SystemTime::now())
+                    .into(),
+                size: metadata.len(),
+            });
+        }
+    }
+
+    let status = IndexStatus {
+        total_files: index.len(),
+        last_updated: Utc::now(),
+        root_path: state.root_path.to_string_lossy().to_string(),
+    };
+
+    Json(status)
+}
+
 async fn search(
     Query(query): Query<SearchQuery>,
     State(state): State<AppState>,
 ) -> Json<SearchResult> {
-    let search_term = query.q;
-    let root_path = state.root_path.as_str();
-
-    // Create fzf command
-    let mut child = tokio::process::Command::new("fzf")
-        .arg("--filter")
-        .arg(&search_term)
-        .current_dir(root_path)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .expect("Failed to spawn fzf");
-
-    // Use find to get only regular files (not directories)
-    let find_output = tokio::process::Command::new("find")
-        .arg(".")
-        .arg("-type")
-        .arg("f")  // Only regular files
-        .current_dir(root_path)
-        .output()
-        .await
-        .expect("Failed to execute find");
-
-    // Write find output to fzf's stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&find_output.stdout).await.ok();
-        stdin.flush().await.ok();
-    }
-
-    // Read fzf output
-    let output = child.wait_with_output().await.expect("Failed to get fzf output");
-    let files: Vec<FileInfo> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|s| {
-            let path = PathBuf::from(s);
-            // Additional check to ensure it's a file
-            if path.is_file() || !path.ends_with("/") {
-                Some(FileInfo {
-                    path: s.to_string(),
-                    name: path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(s)
-                        .to_string(),
-                })
-            } else {
-                None
-            }
+    let matcher = SkimMatcherV2::default();
+    let index = state.index.read().await;
+    
+    let mut matches: Vec<(i64, IndexEntry)> = index.iter()
+        .filter_map(|entry| {
+            matcher.fuzzy_match(&entry.path, &query.q)
+                .map(|score| (score, entry.clone()))
         })
         .collect();
 
-    Json(SearchResult { files })
+    // Sort by score descending
+    matches.sort_by(|a, b| b.0.cmp(&a.0));
+
+    Json(SearchResult {
+        files: matches.into_iter().map(|(_, entry)| entry).collect()
+    })
 }
 
 async fn download_file(
@@ -274,13 +292,15 @@ async fn main() {
     };
 
     let state = AppState {
-        root_path: Arc::new(root_path),
+        root_path: Arc::new(PathBuf::from(root_path)),
+        index: Arc::new(RwLock::new(Vec::new())),
     };
 
     let app = Router::new()
         .route("/", get(index))
         .route("/search", get(search))
         .route("/download/*path", get(download_file))
+        .route("/create-index", post(create_index))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
