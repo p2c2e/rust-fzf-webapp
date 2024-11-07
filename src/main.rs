@@ -665,11 +665,17 @@ async fn change_path(
     *Arc::make_mut(&mut Arc::clone(&state.root_path)) = new_path.clone();
     println!("Updated root path to: {}", state.root_path.display());
     
-    // Clear the existing index
+    // Try to load existing index for the new path
+    let loaded_index = IndexEntry::load_index(&new_path).unwrap_or_else(|e| {
+        println!("Could not load existing index for {}: {}", new_path.display(), e);
+        Vec::new()
+    });
+
+    // Update the index with loaded data
     {
         let mut index = state.index.write().await;
-        index.clear();
-        println!("Cleared existing index");
+        *index = loaded_index;
+        println!("Loaded existing index with {} entries", index.len());
     }
     
     // Update config with new path
@@ -679,10 +685,13 @@ async fn change_path(
         let _ = config.save();
         println!("Updated config with new path");
     }
-    
-    // Create new index
-    println!("Creating new index...");
-    create_index(State(state.clone())).await
+
+    // Return current index status
+    Json(IndexStatus {
+        total_files: state.index.read().await.len(),
+        last_updated: Utc::now(),
+        root_path: state.root_path.to_string_lossy().to_string(),
+    })
 }
 
 async fn purge_indices() -> Json<String> {
