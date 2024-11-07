@@ -134,7 +134,11 @@ async fn index() -> Html<&'static str> {
         </head>
         <body>
             <h1>Fuzzy File Search</h1>
+            <div id="currentPath" style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px;">
+                Current Path: <span id="pathDisplay"></span>
+            </div>
             <div class="controls">
+                <button onclick="openDirectoryBrowser()">Browse Directories</button>
                 <select id="pathSelect" onchange="changePath(this.value)">
                     <option value="">Select a recent path...</option>
                 </select>
@@ -259,6 +263,93 @@ async fn index() -> Html<&'static str> {
                     if (e.key === 'Enter') {
                         search();
                     }
+                });
+                async function openDirectoryBrowser() {
+                    const currentPath = document.getElementById('pathDisplay').textContent || '/';
+                    try {
+                        const response = await fetch(`/list-directories/${encodeURIComponent(currentPath)}`);
+                        const dirs = await response.json();
+                        
+                        const modal = document.createElement('div');
+                        modal.style.cssText = `
+                            position: fixed;
+                            top: 50%;
+                            left: 50%;
+                            transform: translate(-50%, -50%);
+                            background: white;
+                            padding: 20px;
+                            border-radius: 8px;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                            max-width: 80%;
+                            max-height: 80vh;
+                            overflow-y: auto;
+                            z-index: 1000;
+                        `;
+                        
+                        const parentLink = document.createElement('a');
+                        parentLink.href = '#';
+                        parentLink.textContent = '📁 ..';
+                        parentLink.onclick = (e) => {
+                            e.preventDefault();
+                            const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+                            changePath(parentPath);
+                            modal.remove();
+                        };
+                        modal.appendChild(parentLink);
+                        modal.appendChild(document.createElement('br'));
+                        
+                        dirs.forEach(dir => {
+                            const link = document.createElement('a');
+                            link.href = '#';
+                            link.textContent = `📁 ${dir.split('/').pop()}`;
+                            link.style.display = 'block';
+                            link.style.padding = '5px 0';
+                            link.onclick = (e) => {
+                                e.preventDefault();
+                                changePath(dir);
+                                modal.remove();
+                            };
+                            modal.appendChild(link);
+                        });
+                        
+                        document.body.appendChild(modal);
+                    } catch (err) {
+                        console.error('Error listing directories:', err);
+                    }
+                }
+
+                // Update path display when path changes
+                function updatePathDisplay(path) {
+                    document.getElementById('pathDisplay').textContent = path;
+                }
+
+                // Modify existing changePath function
+                async function changePath(path) {
+                    if (!path) return;
+                    
+                    const statusSpan = document.getElementById('indexStatus');
+                    statusSpan.textContent = 'Changed to: ' + path;
+                    updatePathDisplay(path);
+                    
+                    try {
+                        const response = await fetch('/change-path', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ path }),
+                        });
+                        const result = await response.json();
+                        statusSpan.textContent = `Changed to ${path} (${result.total_files} files indexed)`;
+                    } catch (err) {
+                        statusSpan.textContent = 'Error changing path: ' + err.message;
+                    }
+                }
+
+                // Initialize path display on load
+                window.addEventListener('load', () => {
+                    const initialPath = new URLSearchParams(window.location.search).get('path') || '/';
+                    updatePathDisplay(initialPath);
                 });
             </script>
         </body>
@@ -394,13 +485,31 @@ async fn change_path(
 }
 
 #[tokio::main]
+async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>> {
+    let path = PathBuf::from(current_path);
+    let mut dirs = Vec::new();
+    
+    if let Ok(entries) = fs::read_dir(&path) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_dir() {
+                    if let Ok(path_str) = entry.path().to_str().map(String::from) {
+                        dirs.push(path_str);
+                    }
+                }
+            }
+        }
+    }
+    
+    dirs.sort();
+    Json(dirs)
+}
+
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
-    let root_path = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        ".".to_string()
-    };
+    let root_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
 
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
@@ -424,6 +533,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/create-index", post(create_index))
         .route("/recent-paths", get(get_recent_paths))
         .route("/change-path", post(change_path))
+        .route("/list-directories/:path", get(list_directories))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
