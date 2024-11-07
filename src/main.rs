@@ -57,7 +57,9 @@ impl IndexEntry {
 fn get_index_dir() -> io::Result<PathBuf> {
     let proj_dirs = directories::ProjectDirs::from("", "", "rsconfig")
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not determine index directory"))?;
-    Ok(proj_dirs.cache_dir().join("indices"))
+    let index_dir = proj_dirs.cache_dir().join("indices");
+    println!("Index directory: {}", index_dir.display());
+    Ok(index_dir)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
