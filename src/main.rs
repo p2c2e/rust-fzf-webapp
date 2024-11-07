@@ -694,7 +694,7 @@ async fn change_path(
     // Update config with new path
     {
         let mut config = state.config.write().await;
-        config.add_path(req.path);
+        config.add_path(req.path.clone());
         let _ = config.save();
         println!("Updated config with new path");
     }
