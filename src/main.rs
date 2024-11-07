@@ -187,6 +187,7 @@ async fn index() -> Html<&'static str> {
                     <option value="">Select recent path...</option>
                 </select>
                 <button onclick="createIndex()">Create/Update Index</button>
+                <button onclick="purgeIndices()" style="background-color: #ff4444; color: white;">Purge All Indices</button>
                 <button onclick="openDirectoryBrowser()">Browse Directories</button>
             </div>
             <div class="search-container">
@@ -233,6 +234,25 @@ async fn index() -> Html<&'static str> {
                         statusSpan.textContent = `Loaded index with ${result.total_files} files`;
                     } catch (err) {
                         statusSpan.textContent = 'Error changing path: ' + err.message;
+                    }
+                }
+
+                async function purgeIndices() {
+                    if (!confirm('Are you sure you want to delete all saved indices?')) {
+                        return;
+                    }
+                    
+                    const statusSpan = document.getElementById('indexStatus');
+                    statusSpan.textContent = 'Purging all indices...';
+                    
+                    try {
+                        const response = await fetch('/purge-indices', {
+                            method: 'POST'
+                        });
+                        const result = await response.json();
+                        statusSpan.textContent = result;
+                    } catch (err) {
+                        statusSpan.textContent = 'Error purging indices: ' + err.message;
                     }
                 }
 
@@ -663,6 +683,15 @@ async fn change_path(
     create_index(State(state.clone())).await
 }
 
+async fn purge_indices() -> Json<String> {
+    if let Ok(index_dir) = get_index_dir() {
+        if let Err(e) = fs::remove_dir_all(&index_dir) {
+            return Json(format!("Error purging indices: {}", e));
+        }
+    }
+    Json("All indices purged successfully".to_string())
+}
+
 async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>> {
     let path = PathBuf::from(current_path);
     let mut dirs = Vec::new();
@@ -731,6 +760,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/recent-paths", get(get_recent_paths))
         .route("/change-path", post(change_path))
         .route("/list-directories/:path", get(list_directories))
+        .route("/purge-indices", post(purge_indices))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
