@@ -484,7 +484,6 @@ async fn change_path(
     create_index(State(state.clone())).await
 }
 
-#[tokio::main]
 async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>> {
     let path = PathBuf::from(current_path);
     let mut dirs = Vec::new();
@@ -493,7 +492,7 @@ async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>>
         for entry in entries.filter_map(|e| e.ok()) {
             if let Ok(file_type) = entry.file_type() {
                 if file_type.is_dir() {
-                    if let Ok(path_str) = entry.path().to_str().map(String::from) {
+                    if let Some(path_str) = entry.path().to_str().map(String::from) {
                         dirs.push(path_str);
                     }
                 }
