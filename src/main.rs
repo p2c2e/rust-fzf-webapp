@@ -534,11 +534,21 @@ async fn index() -> Html<&'static str> {
 
                 // Initialize path display on load
                 window.addEventListener('load', async () => {
-                    const response = await fetch('/recent-paths');
-                    const paths = await response.json();
-                    if (paths && paths.length > 0) {
-                        // Use the most recent path
-                        updatePathDisplay(paths[0].path);
+                    try {
+                        // First try to get the current working directory
+                        const response = await fetch('/recent-paths');
+                        const paths = await response.json();
+                        if (paths && paths.length > 0) {
+                            const currentPath = paths[0].path;
+                            updatePathDisplay(currentPath);
+                            // Also update the select dropdown to show this path as selected
+                            const pathSelect = document.getElementById('pathSelect');
+                            if (pathSelect) {
+                                pathSelect.value = currentPath;
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error initializing path display:', err);
                     }
                 });
             </script>
