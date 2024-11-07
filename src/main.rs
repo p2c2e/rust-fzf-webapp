@@ -12,9 +12,8 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::{Path as FilePath, PathBuf};
+use std::path::PathBuf;
 use tokio::sync::RwLock;
 use walkdir::WalkDir;
 use std::fs;
@@ -376,10 +375,14 @@ async fn change_path(
     State(state): State<AppState>,
     Json(req): Json<ChangePathRequest>,
 ) -> Json<IndexStatus> {
-    // Update root path
-    *state.root_path.write().await = PathBuf::from(&req.path);
-    
     // Update config
+    let new_path = PathBuf::from(&req.path);
+    // Create new state with updated path
+    let state = AppState {
+        root_path: Arc::new(new_path),
+        index: state.index,
+        config: state.config,
+    };
     {
         let mut config = state.config.write().await;
         config.add_path(req.path);
