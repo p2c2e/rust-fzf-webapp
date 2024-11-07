@@ -67,10 +67,12 @@ struct Config {
     recent_paths: Vec<String>,
 }
 
+use std::collections::HashMap;
+
 #[derive(Clone)]
 struct AppState {
     root_path: Arc<PathBuf>,
-    index: Arc<RwLock<Vec<IndexEntry>>>,
+    indices: Arc<RwLock<HashMap<String, Vec<IndexEntry>>>>,
     config: Arc<RwLock<Config>>,
 }
 
@@ -511,11 +513,11 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
-    println!("Creating index for root path: {}", state.root_path.display());
-    let mut index = state.index.write().await;
-    index.clear();
-
-    for entry in WalkDir::new(state.root_path.as_ref())
+    let root_path = state.root_path.clone();
+    println!("Creating index for root path: {}", root_path.display());
+    
+    let mut new_index = Vec::new();
+    for entry in WalkDir::new(root_path.as_ref())
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
@@ -529,7 +531,7 @@ async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
             
             println!("Indexing file: {} (relative path: {})", full_path.display(), path);
             
-            index.push(IndexEntry {
+            new_index.push(IndexEntry {
                 path: path.clone(),
                 name: entry.file_name().to_string_lossy().to_string(),
                 last_modified: metadata.modified()
@@ -540,14 +542,20 @@ async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
         }
     }
 
+    // Update the indices map with the new index
+    {
+        let mut indices = state.indices.write().await;
+        indices.insert(root_path.to_string_lossy().to_string(), new_index.clone());
+    }
+
     let status = IndexStatus {
-        total_files: index.len(),
+        total_files: new_index.len(),
         last_updated: Utc::now(),
-        root_path: state.root_path.to_string_lossy().to_string(),
+        root_path: root_path.to_string_lossy().to_string(),
     };
 
     // Save the index to disk
-    if let Err(e) = IndexEntry::save_index(&index, &state.root_path) {
+    if let Err(e) = IndexEntry::save_index(&new_index, &root_path) {
         println!("Error saving index: {}", e);
     } else {
         println!("Index saved successfully");
@@ -561,7 +569,11 @@ async fn search(
     State(state): State<AppState>,
 ) -> Json<SearchResult> {
     let matcher = SkimMatcherV2::default();
-    let index = state.index.read().await;
+    let indices = state.indices.read().await;
+    
+    // Get the current path's index
+    let current_path = state.root_path.to_string_lossy().to_string();
+    let index = indices.get(&current_path).unwrap_or(&Vec::new());
     
     let mut matches: Vec<(i64, IndexEntry)> = index.iter()
         .filter_map(|entry| {
@@ -671,11 +683,11 @@ async fn change_path(
         Vec::new()
     });
 
-    // Update the index with loaded data
+    // Update the indices map with the loaded index
     {
-        let mut index = state.index.write().await;
-        *index = loaded_index;
-        println!("Loaded existing index with {} entries", index.len());
+        let mut indices = state.indices.write().await;
+        indices.insert(new_path.to_string_lossy().to_string(), loaded_index.clone());
+        println!("Loaded existing index with {} entries", loaded_index.len());
     }
     
     // Update config with new path
@@ -744,15 +756,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
     // Try to load existing index
+    let mut initial_indices = HashMap::new();
     let initial_index = IndexEntry::load_index(&PathBuf::from(&root_path))
         .unwrap_or_else(|e| {
             println!("Could not load existing index: {}", e);
             Vec::new()
         });
+    initial_indices.insert(root_path.clone(), initial_index);
 
     let state = AppState {
         root_path: Arc::new(PathBuf::from(&root_path)),
-        index: Arc::new(RwLock::new(initial_index)),
+        indices: Arc::new(RwLock::new(initial_indices)),
         config: Arc::new(RwLock::new(config)),
     };
     
