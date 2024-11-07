@@ -62,7 +62,7 @@ fn get_index_dir() -> io::Result<PathBuf> {
     Ok(index_dir)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct PathConfig {
     path: String,
     last_indexed: Option<DateTime<Utc>>,
