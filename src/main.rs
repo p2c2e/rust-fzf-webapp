@@ -221,6 +221,7 @@ async fn index() -> Html<&'static str> {
                 </select>
                 <button onclick="createIndex()">Create/Update Index</button>
                 <button onclick="purgeIndices()" style="background-color: #ff4444; color: white;">Purge All Indices</button>
+                <button onclick="clearRecentPaths()" style="background-color: #ff4444; color: white;">Clear Recent Paths</button>
                 <button onclick="openDirectoryBrowser()">Browse Directories</button>
             </div>
             <div class="search-container">
@@ -269,6 +270,31 @@ async fn index() -> Html<&'static str> {
                         statusSpan.textContent = `Loaded index with ${result.total_files} files`;
                     } catch (err) {
                         statusSpan.textContent = 'Error changing path: ' + err.message;
+                    }
+                }
+
+                async function clearRecentPaths() {
+                    if (!confirm('Are you sure you want to clear all recent paths?')) {
+                        return;
+                    }
+                    
+                    const statusSpan = document.getElementById('indexStatus');
+                    statusSpan.textContent = 'Clearing recent paths...';
+                    
+                    try {
+                        const response = await fetch('/clear-recent-paths', {
+                            method: 'POST'
+                        });
+                        const result = await response.json();
+                        statusSpan.textContent = result;
+                        
+                        // Clear the path select dropdown
+                        const select = document.getElementById('pathSelect');
+                        while (select.options.length > 1) { // Keep the first "Select recent path..." option
+                            select.remove(1);
+                        }
+                    } catch (err) {
+                        statusSpan.textContent = 'Error clearing recent paths: ' + err.message;
                     }
                 }
 
@@ -777,6 +803,30 @@ async fn get_current_path(State(state): State<AppState>) -> Json<serde_json::Val
     }))
 }
 
+async fn clear_recent_paths(State(state): State<AppState>) -> Json<String> {
+    // Clear the recent paths while keeping the current directory
+    let current_dir = state.user_selected_dir.read().await.clone();
+    let current_dir_str = current_dir.to_string_lossy().to_string();
+    
+    // Reset the config with empty recent paths
+    let mut config = state.config.write().await;
+    config.recent_paths.clear();
+    
+    // Add back only the current directory
+    if let Ok(metadata) = std::fs::metadata(&current_dir) {
+        if metadata.is_dir() {
+            config.add_path(current_dir_str, 0);
+        }
+    }
+    
+    // Save the updated config
+    if let Err(e) = config.save() {
+        return Json(format!("Error saving config: {}", e));
+    }
+    
+    Json("Recent paths cleared successfully".to_string())
+}
+
 async fn purge_indices() -> Json<String> {
     if let Ok(index_dir) = get_index_dir() {
         if let Err(e) = fs::remove_dir_all(&index_dir) {
@@ -864,6 +914,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/list-directories/:path", get(list_directories))
         .route("/purge-indices", post(purge_indices))
         .route("/current-path", get(get_current_path))
+        .route("/clear-recent-paths", post(clear_recent_paths))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
