@@ -456,6 +456,7 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
+    println!("Creating index for root path: {}", state.root_path.display());
     let mut index = state.index.write().await;
     index.clear();
 
@@ -465,10 +466,13 @@ async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
         .filter(|e| e.file_type().is_file())
     {
         if let Ok(metadata) = entry.metadata() {
+            let full_path = entry.path();
             let path = entry.path().strip_prefix(state.root_path.as_ref())
                 .unwrap_or(entry.path())
                 .to_string_lossy()
                 .to_string();
+            
+            println!("Indexing file: {} (relative path: {})", full_path.display(), path);
             
             index.push(IndexEntry {
                 path: path.clone(),
