@@ -596,14 +596,8 @@ async fn change_path(
     State(state): State<AppState>,
     Json(req): Json<ChangePathRequest>,
 ) -> Json<IndexStatus> {
-    // Update config
-    let new_path = PathBuf::from(&req.path);
-    // Create new state with updated path
-    let state = AppState {
-        root_path: Arc::new(new_path),
-        index: state.index,
-        config: state.config,
-    };
+    // Update the root path in the existing state
+    *Arc::make_mut(&mut Arc::clone(&state.root_path)) = PathBuf::from(&req.path);
     {
         let mut config = state.config.write().await;
         config.add_path(req.path);
