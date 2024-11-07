@@ -27,6 +27,39 @@ struct IndexEntry {
     size: u64,
 }
 
+impl IndexEntry {
+    fn save_index(entries: &[IndexEntry], root_path: &PathBuf) -> io::Result<()> {
+        let index_dir = get_index_dir()?;
+        fs::create_dir_all(&index_dir)?;
+        
+        // Create a unique filename based on the root path
+        let path_hash = format!("{:x}", md5::compute(root_path.to_string_lossy().as_bytes()));
+        let index_path = index_dir.join(format!("index_{}.json", path_hash));
+        
+        let contents = serde_json::to_string_pretty(entries)?;
+        fs::write(index_path, contents)
+    }
+
+    fn load_index(root_path: &PathBuf) -> io::Result<Vec<IndexEntry>> {
+        let index_dir = get_index_dir()?;
+        let path_hash = format!("{:x}", md5::compute(root_path.to_string_lossy().as_bytes()));
+        let index_path = index_dir.join(format!("index_{}.json", path_hash));
+
+        if index_path.exists() {
+            let contents = fs::read_to_string(index_path)?;
+            Ok(serde_json::from_str(&contents)?)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+}
+
+fn get_index_dir() -> io::Result<PathBuf> {
+    let proj_dirs = directories::ProjectDirs::from("", "", "rsconfig")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not determine index directory"))?;
+    Ok(proj_dirs.cache_dir().join("indices"))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
     recent_paths: Vec<String>,
@@ -491,6 +524,13 @@ async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
         root_path: state.root_path.to_string_lossy().to_string(),
     };
 
+    // Save the index to disk
+    if let Err(e) = IndexEntry::save_index(&index, &state.root_path) {
+        println!("Error saving index: {}", e);
+    } else {
+        println!("Index saved successfully");
+    }
+
     Json(status)
 }
 
@@ -663,9 +703,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
+    // Try to load existing index
+    let initial_index = IndexEntry::load_index(&PathBuf::from(&root_path))
+        .unwrap_or_else(|e| {
+            println!("Could not load existing index: {}", e);
+            Vec::new()
+        });
+
     let state = AppState {
         root_path: Arc::new(PathBuf::from(&root_path)),
-        index: Arc::new(RwLock::new(Vec::new())),
+        index: Arc::new(RwLock::new(initial_index)),
         config: Arc::new(RwLock::new(config)),
     };
     
