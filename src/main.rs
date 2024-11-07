@@ -17,10 +17,21 @@ use std::net::SocketAddr;
 use std::path::{Path as FilePath, PathBuf};
 use tokio::sync::RwLock;
 use walkdir::WalkDir;
+use std::fs;
+use std::io;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct IndexEntry {
+    path: String,
+    name: String,
+    last_modified: DateTime<Utc>,
+    size: u64,
+}
 
 #[derive(Clone)]
 struct AppState {
-    root_path: Arc<String>,
+    root_path: Arc<PathBuf>,
+    index: Arc<RwLock<Vec<IndexEntry>>>,
 }
 
 #[derive(Deserialize)]
@@ -30,13 +41,14 @@ struct SearchQuery {
 
 #[derive(Serialize)]
 struct SearchResult {
-    files: Vec<FileInfo>,
+    files: Vec<IndexEntry>,
 }
 
 #[derive(Serialize)]
-struct FileInfo {
-    path: String,
-    name: String,
+struct IndexStatus {
+    total_files: usize,
+    last_updated: DateTime<Utc>,
+    root_path: String,
 }
 
 async fn index() -> Html<&'static str> {
