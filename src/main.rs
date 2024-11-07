@@ -785,15 +785,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Vec::new()
         });
     initial_indices.insert(root_path.clone(), initial_index.clone());
-    
-    // Try to load existing index
-    let mut initial_indices = HashMap::new();
-    let initial_index = IndexEntry::load_index(&PathBuf::from(&root_path))
-        .unwrap_or_else(|e| {
-            println!("Could not load existing index: {}", e);
-            Vec::new()
-        });
-    initial_indices.insert(root_path.clone(), initial_index);
 
     let state = AppState {
         root_path: Arc::new(PathBuf::from(&root_path)),
@@ -804,7 +795,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Add initial path to config
     {
         let mut config = state.config.write().await;
-        config.add_path(root_path);
+        config.add_path(root_path, initial_index.len());
         let _ = config.save();
     }
 
