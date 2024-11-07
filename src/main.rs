@@ -516,10 +516,19 @@ async fn download_file(
     Path(file_path): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
-    let full_path = state.root_path.as_ref().join(&file_path);
+    // Ensure the file_path doesn't contain parent directory traversal
+    let file_path = PathBuf::from(file_path);
+    if file_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Response::builder()
+            .status(403)
+            .body(Body::from("Invalid path"))
+            .unwrap();
+    }
+
+    let full_path = state.root_path.join(&file_path);
     
-    // Additional check to ensure we're only serving files, not directories
-    if !full_path.is_file() {
+    // Additional check to ensure we're only serving files within root_path
+    if !full_path.starts_with(&*state.root_path) || !full_path.is_file() {
         return Response::builder()
             .status(404)
             .body(Body::from("Not a file or file not found"))
