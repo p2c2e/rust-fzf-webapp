@@ -505,7 +505,8 @@ async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>>
     Json(dirs)
 }
 
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tokio::runtime::Runtime::new()?.block_on(async {
     let root_path = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .to_string_lossy()
@@ -545,5 +546,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    Ok(())
+        Ok(())
+    })
 }
