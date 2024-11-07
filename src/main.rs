@@ -533,9 +533,13 @@ async fn index() -> Html<&'static str> {
                 }
 
                 // Initialize path display on load
-                window.addEventListener('load', () => {
-                    const initialPath = new URLSearchParams(window.location.search).get('path') || '/';
-                    updatePathDisplay(initialPath);
+                window.addEventListener('load', async () => {
+                    const response = await fetch('/recent-paths');
+                    const paths = await response.json();
+                    if (paths && paths.length > 0) {
+                        // Use the most recent path
+                        updatePathDisplay(paths[0].path);
+                    }
                 });
             </script>
         </body>
