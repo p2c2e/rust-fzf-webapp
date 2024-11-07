@@ -63,8 +63,15 @@ fn get_index_dir() -> io::Result<PathBuf> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct PathConfig {
+    path: String,
+    last_indexed: Option<DateTime<Utc>>,
+    total_files: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct Config {
-    recent_paths: Vec<String>,
+    recent_paths: Vec<PathConfig>,
 }
 
 use std::collections::HashMap;
@@ -96,13 +103,25 @@ impl Config {
         fs::write(config_path, contents)
     }
 
-    fn add_path(&mut self, path: String) {
-        if !self.recent_paths.contains(&path) {
-            self.recent_paths.insert(0, path);
+    fn add_path(&mut self, path: String, total_files: usize) {
+        if let Some(existing) = self.recent_paths.iter_mut()
+            .find(|p| p.path == path) {
+            existing.last_indexed = Some(Utc::now());
+            existing.total_files = total_files;
+        } else {
+            self.recent_paths.insert(0, PathConfig {
+                path,
+                last_indexed: Some(Utc::now()),
+                total_files,
+            });
             if self.recent_paths.len() > 5 {
                 self.recent_paths.pop();
             }
         }
+    }
+
+    fn get_paths(&self) -> Vec<String> {
+        self.recent_paths.iter().map(|p| p.path.clone()).collect()
     }
 }
 
@@ -212,10 +231,12 @@ async fn index() -> Html<&'static str> {
                     const paths = await response.json();
                     const select = document.getElementById('pathSelect');
                     
-                    paths.forEach(path => {
+                    paths.forEach(pathConfig => {
                         const option = document.createElement('option');
-                        option.value = path;
-                        option.textContent = path;
+                        option.value = pathConfig.path;
+                        const lastIndexed = pathConfig.last_indexed ? 
+                            new Date(pathConfig.last_indexed).toLocaleString() : 'Never';
+                        option.textContent = `${pathConfig.path} (${pathConfig.total_files} files, indexed: ${lastIndexed})`;
                         select.appendChild(option);
                     });
                 });
@@ -662,7 +683,7 @@ struct ChangePathRequest {
     path: String,
 }
 
-async fn get_recent_paths(State(state): State<AppState>) -> Json<Vec<String>> {
+async fn get_recent_paths(State(state): State<AppState>) -> Json<Vec<PathConfig>> {
     let config = state.config.read().await;
     Json(config.recent_paths.clone())
 }
@@ -694,7 +715,7 @@ async fn change_path(
     // Update config with new path
     {
         let mut config = state.config.write().await;
-        config.add_path(req.path.clone());
+        config.add_path(req.path.clone(), loaded_index.len());
         let _ = config.save();
         println!("Updated config with new path");
     }
@@ -755,6 +776,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .to_string();
 
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
+    
+    // Try to load existing index
+    let mut initial_indices = HashMap::new();
+    let initial_index = IndexEntry::load_index(&PathBuf::from(&root_path))
+        .unwrap_or_else(|e| {
+            println!("Could not load existing index: {}", e);
+            Vec::new()
+        });
+    initial_indices.insert(root_path.clone(), initial_index.clone());
     
     // Try to load existing index
     let mut initial_indices = HashMap::new();
