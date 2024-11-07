@@ -535,17 +535,22 @@ async fn index() -> Html<&'static str> {
                 // Initialize path display on load
                 window.addEventListener('load', async () => {
                     try {
-                        // First try to get the current working directory
-                        const response = await fetch('/recent-paths');
-                        const paths = await response.json();
-                        if (paths && paths.length > 0) {
-                            const currentPath = paths[0].path;
-                            updatePathDisplay(currentPath);
-                            // Also update the select dropdown to show this path as selected
-                            const pathSelect = document.getElementById('pathSelect');
-                            if (pathSelect) {
-                                pathSelect.value = currentPath;
-                            }
+                        // Get the current working directory and recent paths
+                        const [cwdResponse, pathsResponse] = await Promise.all([
+                            fetch('/current-path'),
+                            fetch('/recent-paths')
+                        ]);
+                        
+                        const currentPath = await cwdResponse.json();
+                        const paths = await pathsResponse.json();
+                        
+                        // Update the path display with current working directory
+                        updatePathDisplay(currentPath.path);
+                        
+                        // Update the select dropdown
+                        const pathSelect = document.getElementById('pathSelect');
+                        if (pathSelect) {
+                            pathSelect.value = currentPath.path;
                         }
                     } catch (err) {
                         console.error('Error initializing path display:', err);
@@ -765,6 +770,13 @@ async fn change_path(
     })
 }
 
+async fn get_current_path(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let current_path = state.user_selected_dir.read().await;
+    Json(serde_json::json!({
+        "path": current_path.to_string_lossy().to_string()
+    }))
+}
+
 async fn purge_indices() -> Json<String> {
     if let Ok(index_dir) = get_index_dir() {
         if let Err(e) = fs::remove_dir_all(&index_dir) {
@@ -851,6 +863,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/change-path", post(change_path))
         .route("/list-directories/:path", get(list_directories))
         .route("/purge-indices", post(purge_indices))
+        .route("/current-path", get(get_current_path))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
