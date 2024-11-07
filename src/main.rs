@@ -536,7 +536,7 @@ async fn index() -> Html<&'static str> {
 
 async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
     let user_selected_dir = state.user_selected_dir.read().await.clone();
-    println!("Creating index for root path: {}", root_path.display());
+    println!("Creating index for directory: {}", user_selected_dir.display());
     
     let mut new_index = Vec::new();
     for entry in WalkDir::new(&user_selected_dir)
@@ -546,7 +546,7 @@ async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
     {
         if let Ok(metadata) = entry.metadata() {
             let full_path = entry.path();
-            let path = entry.path().strip_prefix(state.root_path.as_ref())
+            let path = entry.path().strip_prefix(&user_selected_dir)
                 .unwrap_or(entry.path())
                 .to_string_lossy()
                 .to_string();
@@ -594,7 +594,7 @@ async fn search(
     let indices = state.indices.read().await;
     
     // Get the current path's index
-    let current_path = state.root_path.to_string_lossy().to_string();
+    let current_path = user_selected_dir.to_string_lossy().to_string();
     let empty_vec = Vec::new();
     let index = indices.get(&current_path).unwrap_or(&empty_vec);
     
@@ -618,7 +618,7 @@ async fn download_file(
     State(state): State<AppState>,
 ) -> Response {
     println!("Download request for file: {}", file_path);
-    println!("Root path is: {}", state.root_path.display());
+    println!("Selected directory is: {}", state.user_selected_dir.read().await.display());
 
     // Clean the file path and convert to PathBuf
     let file_path = PathBuf::from(file_path.trim_start_matches('/'));
@@ -630,12 +630,13 @@ async fn download_file(
             .unwrap();
     }
 
-    let full_path = state.root_path.join(&file_path);
+    let full_path = state.user_selected_dir.read().await.join(&file_path);
     println!("Full path constructed: {}", full_path.display());
     
     // Additional check to ensure we're only serving files within root_path
-    if !full_path.starts_with(&*state.root_path) {
-        println!("Rejected: Path {} is outside root path {}", full_path.display(), state.root_path.display());
+    let user_dir = state.user_selected_dir.read().await;
+    if !full_path.starts_with(&*user_dir) {
+        println!("Rejected: Path {} is outside selected directory {}", full_path.display(), user_dir.display());
         return Response::builder()
             .status(404)
             .body(Body::from("File path outside root directory"))
@@ -697,8 +698,8 @@ async fn change_path(
     
     // Update the root path in the existing state
     let new_path = PathBuf::from(&req.path);
-    *Arc::make_mut(&mut Arc::clone(&state.root_path)) = new_path.clone();
-    println!("Updated root path to: {}", state.root_path.display());
+    *state.user_selected_dir.write().await = new_path.clone();
+    println!("Updated selected directory to: {}", state.user_selected_dir.read().await.display());
     
     // Try to load existing index for the new path
     let loaded_index = IndexEntry::load_index(&new_path).unwrap_or_else(|e| {
@@ -725,7 +726,7 @@ async fn change_path(
     Json(IndexStatus {
         total_files: state.indices.read().await.get(&req.path).map(|idx| idx.len()).unwrap_or(0),
         last_updated: Utc::now(),
-        root_path: state.root_path.to_string_lossy().to_string(),
+        root_path: state.user_selected_dir.read().await.to_string_lossy().to_string(),
     })
 }
 
@@ -778,12 +779,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Try to load existing index
     let mut initial_indices = HashMap::new();
-    let initial_index = IndexEntry::load_index(&PathBuf::from(&root_path))
+    let initial_index = IndexEntry::load_index(&user_selected_dir)
         .unwrap_or_else(|e| {
             println!("Could not load existing index: {}", e);
             Vec::new()
         });
-    initial_indices.insert(root_path.clone(), initial_index.clone());
+    initial_indices.insert(user_selected_dir.to_string_lossy().to_string(), initial_index.clone());
 
     let state = AppState {
         working_dir: Arc::new(working_dir.clone()),
@@ -795,7 +796,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Add initial path to config
     {
         let mut config = state.config.write().await;
-        config.add_path(root_path, initial_index.len());
+        config.add_path(user_selected_dir.to_string_lossy().to_string(), initial_index.len());
         let _ = config.save();
     }
 
