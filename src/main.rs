@@ -548,8 +548,10 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
+    println!("\n=== Creating Index ===");
     let user_selected_dir = state.user_selected_dir.read().await.clone();
     println!("Creating index for directory: {}", user_selected_dir.display());
+    let start_time = std::time::Instant::now();
     
     let mut new_index = Vec::new();
     for entry in WalkDir::new(&user_selected_dir)
@@ -581,6 +583,8 @@ async fn create_index(State(state): State<AppState>) -> Json<IndexStatus> {
     {
         let mut indices = state.indices.write().await;
         indices.insert(user_selected_dir.to_string_lossy().to_string(), new_index.clone());
+        println!("Index updated with {} files", new_index.len());
+        println!("Indexing completed in {:.2?}", start_time.elapsed());
     }
 
     let status = IndexStatus {
@@ -603,6 +607,9 @@ async fn search(
     Query(query): Query<SearchQuery>,
     State(state): State<AppState>,
 ) -> Json<SearchResult> {
+    println!("\n=== Search Request ===");
+    println!("Search query: {}", query.q);
+    
     let matcher = SkimMatcherV2::default();
     let indices = state.indices.read().await;
     
@@ -621,8 +628,11 @@ async fn search(
     // Sort by score descending
     matches.sort_by(|a, b| b.0.cmp(&a.0));
 
+    let results: Vec<IndexEntry> = matches.into_iter().map(|(_, entry)| entry).collect();
+    println!("Found {} matching files", results.len());
+
     Json(SearchResult {
-        files: matches.into_iter().map(|(_, entry)| entry).collect()
+        files: results
     })
 }
 
@@ -630,6 +640,7 @@ async fn download_file(
     Path(file_path): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
+    println!("\n=== Download Request ===");
     println!("Download request for file: {}", file_path);
     println!("Selected directory is: {}", state.user_selected_dir.read().await.display());
 
@@ -707,7 +718,8 @@ async fn change_path(
     State(state): State<AppState>,
     Json(req): Json<ChangePathRequest>,
 ) -> Json<IndexStatus> {
-    println!("Changing path to: {}", req.path);
+    println!("\n=== Changing Path ===");
+    println!("Request to change path to: {}", req.path);
     
     // Update the root path in the existing state
     let new_path = PathBuf::from(&req.path);
@@ -786,10 +798,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Runtime::new()?.block_on(async {
     // Parse command line arguments
     let args = Args::parse();
+    println!("\n=== Application Startup ===");
     
     // Use provided path or current directory as default
     let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    println!("Working directory: {}", working_dir.display());
+    
     let user_selected_dir = args.path.unwrap_or_else(|| working_dir.clone());
+    println!("Initial user selected directory: {}", user_selected_dir.display());
 
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
