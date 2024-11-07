@@ -266,53 +266,133 @@ async fn index() -> Html<&'static str> {
                 });
                 async function openDirectoryBrowser() {
                     const currentPath = document.getElementById('pathDisplay').textContent || '/';
-                    try {
-                        const response = await fetch(`/list-directories/${encodeURIComponent(currentPath)}`);
-                        const dirs = await response.json();
-                        
-                        const modal = document.createElement('div');
-                        modal.style.cssText = `
-                            position: fixed;
-                            top: 50%;
-                            left: 50%;
-                            transform: translate(-50%, -50%);
-                            background: white;
-                            padding: 20px;
-                            border-radius: 8px;
-                            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                            max-width: 80%;
-                            max-height: 80vh;
-                            overflow-y: auto;
-                            z-index: 1000;
-                        `;
-                        
-                        const parentLink = document.createElement('a');
-                        parentLink.href = '#';
-                        parentLink.textContent = '📁 ..';
-                        parentLink.onclick = (e) => {
-                            e.preventDefault();
-                            const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
-                            changePath(parentPath);
-                            modal.remove();
-                        };
-                        modal.appendChild(parentLink);
-                        modal.appendChild(document.createElement('br'));
-                        
-                        dirs.forEach(dir => {
-                            const link = document.createElement('a');
-                            link.href = '#';
-                            link.textContent = `📁 ${dir.split('/').pop()}`;
-                            link.style.display = 'block';
-                            link.style.padding = '5px 0';
-                            link.onclick = (e) => {
-                                e.preventDefault();
-                                changePath(dir);
-                                modal.remove();
-                            };
-                            modal.appendChild(link);
-                        });
-                        
-                        document.body.appendChild(modal);
+                    
+                    // Create modal overlay
+                    const overlay = document.createElement('div');
+                    overlay.style.cssText = `
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0,0,0,0.5);
+                        z-index: 999;
+                    `;
+                    
+                    async function loadDirectory(path) {
+                        try {
+                            const response = await fetch(`/list-directories/${encodeURIComponent(path)}`);
+                            const dirs = await response.json();
+                            
+                            // Update current path display
+                            pathDisplay.textContent = path;
+                            
+                            // Clear and rebuild directory list
+                            dirList.innerHTML = '';
+                            
+                            dirs.forEach(dir => {
+                                const link = document.createElement('a');
+                                link.href = '#';
+                                const isParent = dir === dirs[0] && path !== '/';
+                                link.textContent = isParent ? '📁 ..' : `📁 ${dir.split('/').pop()}`;
+                                link.style.cssText = `
+                                    display: block;
+                                    padding: 8px;
+                                    text-decoration: none;
+                                    color: #333;
+                                    border-bottom: 1px solid #eee;
+                                `;
+                                link.onmouseover = () => { link.style.backgroundColor = '#f0f0f0'; };
+                                link.onmouseout = () => { link.style.backgroundColor = 'transparent'; };
+                                link.onclick = async (e) => {
+                                    e.preventDefault();
+                                    await loadDirectory(dir);
+                                };
+                                dirList.appendChild(link);
+                            });
+                        } catch (err) {
+                            console.error('Error listing directories:', err);
+                        }
+                    }
+                    
+                    // Create modal content
+                    const modal = document.createElement('div');
+                    modal.style.cssText = `
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                        width: 80%;
+                        max-width: 600px;
+                        max-height: 80vh;
+                        display: flex;
+                        flex-direction: column;
+                        z-index: 1000;
+                    `;
+                    
+                    // Create header with current path display
+                    const header = document.createElement('div');
+                    header.style.marginBottom = '10px';
+                    const pathDisplay = document.createElement('div');
+                    pathDisplay.style.cssText = `
+                        font-weight: bold;
+                        padding: 8px;
+                        background: #f5f5f5;
+                        border-radius: 4px;
+                        margin-bottom: 10px;
+                    `;
+                    header.appendChild(pathDisplay);
+                    
+                    // Create scrollable directory list
+                    const dirList = document.createElement('div');
+                    dirList.style.cssText = `
+                        overflow-y: auto;
+                        flex-grow: 1;
+                        border: 1px solid #eee;
+                        border-radius: 4px;
+                    `;
+                    
+                    // Create footer with buttons
+                    const footer = document.createElement('div');
+                    footer.style.cssText = `
+                        margin-top: 15px;
+                        display: flex;
+                        justify-content: flex-end;
+                        gap: 10px;
+                    `;
+                    
+                    const selectButton = document.createElement('button');
+                    selectButton.textContent = 'Select Directory';
+                    selectButton.onclick = () => {
+                        const selectedPath = pathDisplay.textContent;
+                        changePath(selectedPath);
+                        document.body.removeChild(overlay);
+                    };
+                    
+                    const cancelButton = document.createElement('button');
+                    cancelButton.textContent = 'Cancel';
+                    cancelButton.onclick = () => {
+                        document.body.removeChild(overlay);
+                    };
+                    
+                    footer.appendChild(cancelButton);
+                    footer.appendChild(selectButton);
+                    
+                    // Assemble modal
+                    modal.appendChild(header);
+                    modal.appendChild(dirList);
+                    modal.appendChild(footer);
+                    
+                    // Add modal to overlay
+                    overlay.appendChild(modal);
+                    document.body.appendChild(overlay);
+                    
+                    // Load initial directory
+                    await loadDirectory(currentPath);
                     } catch (err) {
                         console.error('Error listing directories:', err);
                     }
@@ -488,6 +568,16 @@ async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>>
     let path = PathBuf::from(current_path);
     let mut dirs = Vec::new();
     
+    // Add parent directory if not at root
+    if path != PathBuf::from("/") {
+        if let Some(parent) = path.parent() {
+            if let Some(parent_str) = parent.to_str() {
+                dirs.push(parent_str.to_string());
+            }
+        }
+    }
+    
+    // List current directory contents
     if let Ok(entries) = fs::read_dir(&path) {
         for entry in entries.filter_map(|e| e.ok()) {
             if let Ok(file_type) = entry.file_type() {
