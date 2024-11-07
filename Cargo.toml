@@ -16,3 +16,4 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 walkdir = "2.4"
 chrono = { version = "0.4", features = ["serde"] }
 fuzzy-matcher = "0.3"
+directories = "5.0"

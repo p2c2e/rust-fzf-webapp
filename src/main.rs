@@ -28,10 +28,52 @@ struct IndexEntry {
     size: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Config {
+    recent_paths: Vec<String>,
+}
+
 #[derive(Clone)]
 struct AppState {
     root_path: Arc<PathBuf>,
     index: Arc<RwLock<Vec<IndexEntry>>>,
+    config: Arc<RwLock<Config>>,
+}
+
+impl Config {
+    fn load() -> io::Result<Self> {
+        let config_path = get_config_path()?;
+        if config_path.exists() {
+            let contents = fs::read_to_string(config_path)?;
+            Ok(serde_json::from_str(&contents).unwrap_or(Config { recent_paths: vec![] }))
+        } else {
+            Ok(Config { recent_paths: vec![] })
+        }
+    }
+
+    fn save(&self) -> io::Result<()> {
+        let config_path = get_config_path()?;
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let contents = serde_json::to_string_pretty(self)?;
+        fs::write(config_path, contents)
+    }
+
+    fn add_path(&mut self, path: String) {
+        if !self.recent_paths.contains(&path) {
+            self.recent_paths.insert(0, path);
+            if self.recent_paths.len() > 5 {
+                self.recent_paths.pop();
+            }
+        }
+    }
+}
+
+fn get_config_path() -> io::Result<PathBuf> {
+    let proj_dirs = directories::ProjectDirs::from("", "", "rsconfig")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not determine config directory"))?;
+    Ok(proj_dirs.config_dir().join("config.json"))
 }
 
 #[derive(Deserialize)]
@@ -94,6 +136,9 @@ async fn index() -> Html<&'static str> {
         <body>
             <h1>Fuzzy File Search</h1>
             <div class="controls">
+                <select id="pathSelect" onchange="changePath(this.value)">
+                    <option value="">Select a recent path...</option>
+                </select>
                 <button onclick="createIndex()">Create/Update Index</button>
                 <span id="indexStatus"></span>
             </div>
@@ -106,6 +151,41 @@ async fn index() -> Html<&'static str> {
 
             <script>
                 let currentController = null;
+
+                // Load recent paths on page load
+                window.addEventListener('load', async () => {
+                    const response = await fetch('/recent-paths');
+                    const paths = await response.json();
+                    const select = document.getElementById('pathSelect');
+                    
+                    paths.forEach(path => {
+                        const option = document.createElement('option');
+                        option.value = path;
+                        option.textContent = path;
+                        select.appendChild(option);
+                    });
+                });
+
+                async function changePath(path) {
+                    if (!path) return;
+                    
+                    const statusSpan = document.getElementById('indexStatus');
+                    statusSpan.textContent = 'Loading index for ' + path + '...';
+                    
+                    try {
+                        const response = await fetch('/change-path', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ path }),
+                        });
+                        const result = await response.json();
+                        statusSpan.textContent = `Loaded index with ${result.total_files} files`;
+                    } catch (err) {
+                        statusSpan.textContent = 'Error changing path: ' + err.message;
+                    }
+                }
 
                 async function createIndex() {
                     const statusSpan = document.getElementById('indexStatus');
@@ -283,6 +363,34 @@ async fn download_file(
 }
 
 #[tokio::main]
+#[derive(Deserialize)]
+struct ChangePathRequest {
+    path: String,
+}
+
+async fn get_recent_paths(State(state): State<AppState>) -> Json<Vec<String>> {
+    let config = state.config.read().await;
+    Json(config.recent_paths.clone())
+}
+
+async fn change_path(
+    State(state): State<AppState>,
+    Json(req): Json<ChangePathRequest>,
+) -> Json<IndexStatus> {
+    // Update root path
+    *state.root_path.write().await = PathBuf::from(&req.path);
+    
+    // Update config
+    {
+        let mut config = state.config.write().await;
+        config.add_path(req.path);
+        let _ = config.save();
+    }
+    
+    // Create new index
+    create_index(State(state.clone())).await
+}
+
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let root_path = if args.len() > 1 {
@@ -291,16 +399,28 @@ async fn main() {
         ".".to_string()
     };
 
+    let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
+    
     let state = AppState {
-        root_path: Arc::new(PathBuf::from(root_path)),
+        root_path: Arc::new(RwLock::new(PathBuf::from(root_path.clone()))),
         index: Arc::new(RwLock::new(Vec::new())),
+        config: Arc::new(RwLock::new(config)),
     };
+    
+    // Add initial path to config
+    {
+        let mut config = state.config.write().await;
+        config.add_path(root_path);
+        let _ = config.save();
+    }
 
     let app = Router::new()
         .route("/", get(index))
         .route("/search", get(search))
         .route("/download/*path", get(download_file))
         .route("/create-index", post(create_index))
+        .route("/recent-paths", get(get_recent_paths))
+        .route("/change-path", post(change_path))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
