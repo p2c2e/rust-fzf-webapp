@@ -523,8 +523,8 @@ async fn download_file(
     println!("Download request for file: {}", file_path);
     println!("Root path is: {}", state.root_path.display());
 
-    // Ensure the file_path doesn't contain parent directory traversal
-    let file_path = PathBuf::from(file_path);
+    // Clean the file path and convert to PathBuf
+    let file_path = PathBuf::from(file_path.trim_start_matches('/'));
     if file_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         println!("Rejected due to parent directory traversal attempt");
         return Response::builder()
@@ -646,15 +646,16 @@ async fn list_directories(Path(current_path): Path<String>) -> Json<Vec<String>>
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Runtime::new()?.block_on(async {
-    let root_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+    // Start with current directory as default
+    let root_path = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
         .to_string_lossy()
         .to_string();
 
     let config = Config::load().unwrap_or_else(|_| Config { recent_paths: vec![] });
     
     let state = AppState {
-        root_path: Arc::new(PathBuf::from(root_path.clone())),
+        root_path: Arc::new(PathBuf::from(&root_path)),
         index: Arc::new(RwLock::new(Vec::new())),
         config: Arc::new(RwLock::new(config)),
     };
