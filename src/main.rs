@@ -573,7 +573,8 @@ async fn search(
     
     // Get the current path's index
     let current_path = state.root_path.to_string_lossy().to_string();
-    let index = indices.get(&current_path).unwrap_or(&Vec::new());
+    let empty_vec = Vec::new();
+    let index = indices.get(&current_path).unwrap_or(&empty_vec);
     
     let mut matches: Vec<(i64, IndexEntry)> = index.iter()
         .filter_map(|entry| {
@@ -700,7 +701,7 @@ async fn change_path(
 
     // Return current index status
     Json(IndexStatus {
-        total_files: state.index.read().await.len(),
+        total_files: state.indices.read().await.get(&req.path).map(|idx| idx.len()).unwrap_or(0),
         last_updated: Utc::now(),
         root_path: state.root_path.to_string_lossy().to_string(),
     })
