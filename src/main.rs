@@ -393,9 +393,6 @@ async fn index() -> Html<&'static str> {
                     
                     // Load initial directory
                     await loadDirectory(currentPath);
-                    } catch (err) {
-                        console.error('Error listing directories:', err);
-                    }
                 }
 
                 // Update path display when path changes
